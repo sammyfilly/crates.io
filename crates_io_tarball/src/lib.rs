@@ -5,8 +5,9 @@ extern crate claims;
 #[cfg(any(feature = "builder", test))]
 pub use crate::builder::TarballBuilder;
 use crate::limit_reader::LimitErrorReader;
-pub use crate::manifest::Manifest;
+use crate::manifest::validate_manifest;
 pub use crate::vcs_info::CargoVcsInfo;
+pub use cargo_toml::Manifest;
 use flate2::read::GzDecoder;
 use std::io::Read;
 use std::path::Path;
@@ -20,7 +21,7 @@ mod vcs_info;
 
 #[derive(Debug)]
 pub struct TarballInfo {
-    pub manifest: Option<Manifest>,
+    pub manifest: Manifest,
     pub vcs_info: Option<CargoVcsInfo>,
 }
 
@@ -32,6 +33,10 @@ pub enum TarballError {
     InvalidPath(String),
     #[error("unexpected symlink or hard link found: {0}")]
     UnexpectedSymlink(String),
+    #[error("Cargo.toml manifest is missing")]
+    MissingManifest,
+    #[error("Cargo.toml manifest is invalid: {0}")]
+    InvalidManifest(#[from] cargo_toml::Error),
     #[error(transparent)]
     IO(#[from] std::io::Error),
 }
@@ -93,9 +98,17 @@ pub fn process_tarball<R: Read>(
             // erroring if it cannot be read.
             let mut contents = String::new();
             entry.read_to_string(&mut contents)?;
-            manifest = toml::from_str(&contents).ok();
+            manifest = Some({
+                let manifest = Manifest::from_str(&contents)?;
+                validate_manifest(&manifest)?;
+                manifest
+            });
         }
     }
+
+    let Some(manifest) = manifest else {
+        return Err(TarballError::MissingManifest);
+    };
 
     Ok(TarballInfo { manifest, vcs_info })
 }
@@ -110,38 +123,35 @@ mod tests {
     #[test]
     fn process_tarball_test() {
         let tarball = TarballBuilder::new("foo", "0.0.1")
-            .add_raw_manifest(b"")
+            .add_raw_manifest(b"[package]\nname = \"foo\"\nversion = \"0.0.1\"\n")
             .build();
 
         let limit = 512 * 1024 * 1024;
-        assert_eq!(
-            process_tarball("foo-0.0.1", &*tarball, limit)
-                .unwrap()
-                .vcs_info,
-            None
-        );
+
+        let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
+        assert_none!(tarball_info.vcs_info);
+
         assert_err!(process_tarball("bar-0.0.1", &*tarball, limit));
     }
 
     #[test]
     fn process_tarball_test_incomplete_vcs_info() {
         let tarball = TarballBuilder::new("foo", "0.0.1")
-            .add_raw_manifest(b"")
+            .add_raw_manifest(b"[package]\nname = \"foo\"\nversion = \"0.0.1\"\n")
             .add_file("foo-0.0.1/.cargo_vcs_info.json", br#"{"unknown": "field"}"#)
             .build();
 
         let limit = 512 * 1024 * 1024;
-        let vcs_info = process_tarball("foo-0.0.1", &*tarball, limit)
-            .unwrap()
-            .vcs_info
-            .unwrap();
+
+        let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
+        let vcs_info = assert_some!(tarball_info.vcs_info);
         assert_eq!(vcs_info.path_in_vcs, "");
     }
 
     #[test]
     fn process_tarball_test_vcs_info() {
         let tarball = TarballBuilder::new("foo", "0.0.1")
-            .add_raw_manifest(b"")
+            .add_raw_manifest(b"[package]\nname = \"foo\"\nversion = \"0.0.1\"\n")
             .add_file(
                 "foo-0.0.1/.cargo_vcs_info.json",
                 br#"{"path_in_vcs": "path/in/vcs"}"#,
@@ -149,10 +159,9 @@ mod tests {
             .build();
 
         let limit = 512 * 1024 * 1024;
-        let vcs_info = process_tarball("foo-0.0.1", &*tarball, limit)
-            .unwrap()
-            .vcs_info
-            .unwrap();
+
+        let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
+        let vcs_info = assert_some!(tarball_info.vcs_info);
         assert_eq!(vcs_info.path_in_vcs, "path/in/vcs");
     }
 
@@ -162,6 +171,8 @@ mod tests {
             .add_raw_manifest(
                 br#"
 [package]
+name = "foo"
+version = "0.0.1"
 rust-version = "1.59"
 readme = "README.md"
 repository = "https://github.com/foo/bar"
@@ -170,11 +181,12 @@ repository = "https://github.com/foo/bar"
             .build();
 
         let limit = 512 * 1024 * 1024;
+
         let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
-        let manifest = assert_some!(tarball_info.manifest);
-        assert_some_eq!(manifest.package.readme.as_path(), Path::new("README.md"));
-        assert_some_eq!(manifest.package.repository, "https://github.com/foo/bar");
-        assert_some_eq!(manifest.package.rust_version, "1.59");
+        let package = assert_some!(tarball_info.manifest.package);
+        assert_some_eq!(package.readme().as_path(), Path::new("README.md"));
+        assert_some_eq!(package.repository(), "https://github.com/foo/bar");
+        assert_some_eq!(package.rust_version(), "1.59");
     }
 
     #[test]
@@ -183,15 +195,18 @@ repository = "https://github.com/foo/bar"
             .add_raw_manifest(
                 br#"
                 [project]
+                name = "foo"
+                version = "0.0.1"
                 rust-version = "1.23"
                 "#,
             )
             .build();
 
         let limit = 512 * 1024 * 1024;
+
         let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
-        let manifest = assert_some!(tarball_info.manifest);
-        assert_some_eq!(manifest.package.rust_version, "1.23");
+        let package = assert_some!(tarball_info.manifest.package);
+        assert_some_eq!(package.rust_version(), "1.23");
     }
 
     #[test]
@@ -200,14 +215,17 @@ repository = "https://github.com/foo/bar"
             .add_raw_manifest(
                 br#"
                 [package]
+                name = "foo"
+                version = "0.0.1"
                 "#,
             )
             .build();
 
         let limit = 512 * 1024 * 1024;
+
         let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
-        let manifest = assert_some!(tarball_info.manifest);
-        assert_matches!(manifest.package.readme, OptionalFile::Flag(true));
+        let package = assert_some!(tarball_info.manifest.package);
+        assert_matches!(package.readme(), OptionalFile::Flag(true));
     }
 
     #[test]
@@ -216,15 +234,18 @@ repository = "https://github.com/foo/bar"
             .add_raw_manifest(
                 br#"
                 [package]
+                name = "foo"
+                version = "0.0.1"
                 readme = false
                 "#,
             )
             .build();
 
         let limit = 512 * 1024 * 1024;
+
         let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
-        let manifest = assert_some!(tarball_info.manifest);
-        assert_matches!(manifest.package.readme, OptionalFile::Flag(false));
+        let package = assert_some!(tarball_info.manifest.package);
+        assert_matches!(package.readme(), OptionalFile::Flag(false));
     }
 
     #[test]
@@ -234,14 +255,17 @@ repository = "https://github.com/foo/bar"
                 "foo-0.0.1/cargo.toml",
                 br#"
 [package]
+name = "foo"
+version = "0.0.1"
 repository = "https://github.com/foo/bar"
 "#,
             )
             .build();
 
         let limit = 512 * 1024 * 1024;
+
         let tarball_info = assert_ok!(process_tarball("foo-0.0.1", &*tarball, limit));
-        let manifest = assert_some!(tarball_info.manifest);
-        assert_some_eq!(manifest.package.repository, "https://github.com/foo/bar");
+        let package = assert_some!(tarball_info.manifest.package);
+        assert_some_eq!(package.repository(), "https://github.com/foo/bar");
     }
 }

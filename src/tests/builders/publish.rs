@@ -2,7 +2,6 @@ use crates_io::views::krate_publish as u;
 use std::collections::BTreeMap;
 
 use crates_io_tarball::TarballBuilder;
-use flate2::{write::GzEncoder, Compression};
 
 use super::DependencyBuilder;
 
@@ -28,6 +27,12 @@ impl PublishBuilder {
     /// Create a request to publish a crate with the given name and version, and no files
     /// in its tarball.
     pub fn new(krate_name: &str, version: &str) -> Self {
+        let manifest = format!("[package]\nname = \"{krate_name}\"\nversion = \"{version}\"\n");
+
+        let tarball = TarballBuilder::new(krate_name, version)
+            .add_raw_manifest(manifest.as_bytes())
+            .build();
+
         PublishBuilder {
             categories: vec![],
             deps: vec![],
@@ -38,27 +43,21 @@ impl PublishBuilder {
             license: Some("MIT".to_string()),
             license_file: None,
             readme: None,
-            tarball: TarballBuilder::new(krate_name, version).build(),
+            tarball,
             version: semver::Version::parse(version).unwrap(),
             features: BTreeMap::new(),
         }
     }
 
     /// Set the files in the crate's tarball.
-    pub fn files(mut self, files: &[(&str, &[u8])]) -> Self {
-        let mut tarball = Vec::new();
-        {
-            let mut ar = tar::Builder::new(GzEncoder::new(&mut tarball, Compression::default()));
-            for (name, data) in files {
-                let mut header = tar::Header::new_gnu();
-                header.set_size(data.len() as u64);
-                assert_ok!(ar.append_data(&mut header, name, *data));
-            }
-            assert_ok!(ar.finish());
+    pub fn files(self, files: &[(&str, &[u8])]) -> Self {
+        let mut builder = TarballBuilder::new(&self.krate_name, &self.version.to_string());
+
+        for (name, data) in files {
+            builder = builder.add_file(name, data);
         }
 
-        self.tarball = tarball;
-        self
+        self.tarball(builder.build())
     }
 
     /// Set the tarball directly to the given Vec of bytes

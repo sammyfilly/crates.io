@@ -177,11 +177,14 @@ fn render_pkg_readme<R: Read>(mut archive: Archive<R>, pkg_name: &str) -> anyhow
         let contents = find_file_by_path(&mut entries, Path::new(&path))
             .context("Failed to read Cargo.toml file")?;
 
-        toml::from_str(&contents).context("Failed to parse manifest file")?
+        Manifest::from_str(&contents).context("Failed to parse manifest file")?
+
+        // We don't call `validate_manifest()` here since the additional validation is not needed
+        // and it would prevent us from reading a couple of legacy crate files.
     };
 
     let rendered = {
-        let readme = manifest.package.readme;
+        let readme = manifest.package().readme();
         if !readme.is_some() {
             return Ok("".to_string());
         }
@@ -198,7 +201,7 @@ fn render_pkg_readme<R: Read>(mut archive: Archive<R>, pkg_name: &str) -> anyhow
         text_to_html(
             &contents,
             &readme_path,
-            manifest.package.repository.as_deref(),
+            manifest.package().repository(),
             pkg_path_in_vcs,
         )
     };
@@ -237,6 +240,8 @@ pub mod tests {
             .add_raw_manifest(
                 br#"
 [package]
+name = "foo"
+version = "0.0.1"
 readme = "README.md"
 "#,
             )
@@ -270,6 +275,8 @@ readme = "README.md"
             .add_raw_manifest(
                 br#"
 [package]
+name = "foo"
+version = "0.0.1"
 "#,
             )
             .add_file("foo-0.0.1/README.md", b"readme")
@@ -286,6 +293,8 @@ readme = "README.md"
             .add_raw_manifest(
                 br#"
 [package]
+name = "foo"
+version = "0.0.1"
 readme = "README.md"
 repository = "https://github.com/foo/foo"
 "#,
@@ -304,6 +313,8 @@ repository = "https://github.com/foo/foo"
             .add_raw_manifest(
                 br#"
 [package]
+name = "foo"
+version = "0.0.1"
 readme = "docs/README.md"
 repository = "https://github.com/foo/foo"
 "#,
