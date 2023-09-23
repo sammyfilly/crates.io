@@ -22,8 +22,8 @@ dependencies:
     specifier: 7.60.1
     version: 7.60.1
   chart.js:
-    specifier: 4.3.2
-    version: 4.3.2
+    specifier: 4.4.0
+    version: 4.4.0
   copy-text-to-clipboard:
     specifier: 3.2.0
     version: 3.2.0
@@ -6544,8 +6544,8 @@ packages:
       inherits: 2.0.4
     dev: true
 
-  /chart.js@4.3.2:
-    resolution: {integrity: sha512-pvQNyFOY1QmbmIr8oDORL16/FFivfxj8V26VFpFilMo4cNvkV5WXLJetDio365pd9gKUHGdirUTbqJfw8tr+Dg==}
+  /chart.js@4.4.0:
+    resolution: {integrity: sha512-vQEj6d+z0dcsKLlQvbKIMYFHd3t8W/7L2vfJIbYcfyPcRx92CsHqECpueN8qVGNlKyDcr5wBrYAYKnfu/9Q1hQ==}
     engines: {pnpm: '>=7'}
     dependencies:
       '@kurkle/color': 0.3.2
