@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v3.5.3
+      - uses: actions/checkout@v3.6.0
       - uses: Swatinem/rust-cache@v2.5.1
       - run: cargo build --manifest-path crates_io_smoke_test/Cargo.toml
       - run: cargo run --manifest-path crates_io_smoke_test/Cargo.toml --quiet
