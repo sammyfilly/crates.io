@@ -24,6 +24,6 @@ anyhow = "=1.0.72"
 claims = "=0.7.1"
 clap = { version = "=4.3.19", features = ["derive", "unicode", "wrap_help"] }
 indicatif = { version = "=0.17.5", features = ["rayon"] }
-rayon = "=1.7.0"
+rayon = "=1.8.0"
 tracing-subscriber = { version = "=0.3.17", features = ["env-filter"] }
 walkdir = "=2.3.3"
